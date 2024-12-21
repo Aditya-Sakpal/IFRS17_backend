@@ -1,0 +1,9 @@
+fastapi
+psycopg2
+uvicorn
+sqlalchemy
+pydantic[email]
+pandas 
+numpy 
+numpy_financial
+requests
