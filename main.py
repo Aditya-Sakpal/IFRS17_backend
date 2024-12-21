@@ -14,6 +14,10 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the User Management API"}
+
 # Include the router
 app.include_router(db_router, prefix="/api", tags=["Users"])
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
