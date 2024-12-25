@@ -3,9 +3,9 @@ from typing import List, Dict, Any
 import pytz
 import traceback
 import uuid
-import csv
 
-from fastapi import APIRouter, HTTPException, Depends,Form, UploadFile, File
+
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 import pandas as pd
 from sqlalchemy import text
@@ -15,8 +15,6 @@ from models.user_management import User, UserGroup
 from models.calculation import Run , RunInput , CoverageUnitsRec , CashFlow , Liability_Init_Rec , Rec_Bel_Updated 
 from constants.misc import TABLE_MODEL_MAPPING
 from schemas.db_schemas import CreateUserRequest, CreateUserGroupRequest 
-
-from main_exec_func import calculate
 
 router = APIRouter()
 
@@ -312,63 +310,6 @@ def after_run(
         db.rollback()
         print(traceback.format_exc())
         return {"message": "Error in inserting records", "error": str(e)}
-    
-# @router.post("/insert_run", status_code=201)
-# def insert_run(
-#     run_name: str = Form(...),
-#     conf_id: str = Form(...),
-#     reporting_date: str = Form(...),
-#     file: UploadFile = File(...),
-#     db: Session = Depends(get_db)
-# ):
-#     try:
-#         if file.content_type != 'text/csv':
-#             raise HTTPException(status_code=400, detail="Invalid file format. Please upload a CSV file.")
-
-#         # Read and process the uploaded CSV into a DataFrame
-#         try:
-#             # Read the file into a pandas DataFrame
-#             csv_data = pd.read_csv(file.file)
-#         except Exception as e:
-#             raise HTTPException(status_code=400, detail=f"Error reading CSV file: {str(e)}")
-
-#         run , run_input,coverage_uni_recon, actual_cashflow, Liab_init_reco, Rec_BEL_updated, Rec_RA_updated, Rec_CSM_updated, Rec_TotContLiab_up, Rec_AcqExpMor_up, Stat_Profloss_up = calculate(csv_data,run_name,conf_id,reporting_date)
-
-#         dfs_lst = [run, run_input,coverage_uni_recon, actual_cashflow, Liab_init_reco, Rec_BEL_updated, Rec_RA_updated, Rec_CSM_updated, Rec_TotContLiab_up, Rec_AcqExpMor_up, Stat_Profloss_up]
-        
-#         for df in dfs_lst:
-#             try:
-#                 df = df.drop(columns=['Unnamed: 0'], inplace=True)
-#                 df['Active_Flag'] = [True]*len(df)  
-#             except:
-#                 continue
-        
-#         with engine.begin() as conn:
-#             run.to_sql('Run',schema='Calculation',con=conn, if_exists='append', index=False)
-#             run_input.to_sql('RunInput',schema='Calculation',con=conn, if_exists='append', index=False)
-#             coverage_uni_recon.to_sql('Coverage_Units_Rec',schema='Calculation',con=conn, if_exists='append', index=False)
-#             actual_cashflow.to_sql('Actual_Cashflow',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Liab_init_reco.to_sql('Liability_Init_Rec',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Rec_BEL_updated.to_sql('Rec_BEL',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Rec_RA_updated.to_sql('Rec_RA',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Rec_CSM_updated.to_sql('Rec_CSM',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Rec_TotContLiab_up.to_sql('Rec_TotContLiab',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Rec_AcqExpMor_up.to_sql('Rec_AcqExpMor',schema='Calculation',con=conn, if_exists='append', index=False)
-#             Stat_Profloss_up.to_sql('Stat_Profloss',schema='Calculation',con=conn, if_exists='append', index=False)
-        
-        
-#         db.commit()
-        
-#         return {"message": "Run inserted successfully", "result": run.to_dict(orient="records")}
-
-#     except HTTPException as http_ex:
-#         raise http_ex
-
-#     except Exception as e:
-#         db.rollback()
-#         print(traceback.format_exc())
-#         return {"message": "Error in inserting run", "error": str(e)}
-
     
 @router.get("/get_session_history", status_code=200)
 def get_session_history(db: Session = Depends(get_db)):
