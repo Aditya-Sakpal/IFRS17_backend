@@ -8,25 +8,25 @@ from numpy_financial import npv
 
 from db_related.records_insertion import send_bulk_records
 
-def calculate(df_temp):
+def calculate(df_temp,run_name,conf_id,reporting_date):
 
-    sum_assured = df_temp['sum_assured'].astype(float).item()
-    Num_Policies = df_temp['Num_Policies'].astype(float).item()
-    policy_fees = df_temp['policy_fees'].astype(int).item()
-    prem_rate_per1000 = df_temp['prem_rate_per1000'].astype(float).item()
-    policy_Init_comm = df_temp['policy_Init_comm'].astype(float).item()
-    policy_yearly_comm = df_temp['policy_yearly_comm'].astype(float).item()
-    acq_direct_expenses = df_temp['acq_direct_expenses'].astype(float).item()
-    acq_indirect_expense = df_temp['acq_indirect_expense'].astype(float).item()
-    main_direct_expenses = df_temp['main_direct_expenses'].astype(float).item()
-    main_indirect_expenses = df_temp['main_indirect_expenses'].astype(float).item()
-    Total_years = df_temp['Total_years'].astype(int).item()
-    discount_rate = df_temp['discount_rate'].astype(float).item()
-    asset_ret_rate = df_temp['asset_ret_rate'].astype(float).item()
-    CSM_ret_Rate = df_temp['CSM_ret_Rate'].astype(float).item()
-    risk_adjst_rate = df_temp['risk_adjst_rate'].astype(float).item()
-    mortality = df_temp['mortality'].astype(float).item()
-    lapse = df_temp['lapse'].astype(int).item()
+    sum_assured = df_temp['sum_assured'].astype(float)
+    Num_Policies = df_temp['Num_Policies'].astype(float)
+    policy_fees = df_temp['policy_fees'].astype(int)
+    prem_rate_per1000 = df_temp['prem_rate_per1000'].astype(float)
+    policy_Init_comm = df_temp['policy_Init_comm'].astype(float)
+    policy_yearly_comm = df_temp['policy_yearly_comm'].astype(float)
+    acq_direct_expenses = df_temp['acq_direct_expenses'].astype(float)
+    acq_indirect_expense = df_temp['acq_indirect_expense'].astype(float)
+    main_direct_expenses = df_temp['main_direct_expenses'].astype(float)
+    main_indirect_expenses = df_temp['main_indirect_expenses'].astype(float)
+    Total_years = df_temp['Total_years'].astype(int)
+    discount_rate = df_temp['discount_rate'].astype(float)
+    asset_ret_rate = df_temp['asset_ret_rate'].astype(float)
+    CSM_ret_Rate = df_temp['CSM_ret_Rate'].astype(float)
+    risk_adjst_rate = df_temp['risk_adjst_rate'].astype(float)
+    mortality = df_temp['mortality'].astype(float)
+    lapse = df_temp['lapse'].astype(int)
     
     # Create a DataFrame from the user input
     Opening = [0]*Total_years
@@ -542,51 +542,51 @@ def calculate(df_temp):
                                                                         Stat_Profloss_up['Ins_SerExp'].loc[Stat_Profloss_up.index[i]] +
                                                                         Stat_Profloss_up['Other_Exp'].loc[Stat_Profloss_up.index[i]] +
                                                                         Stat_Profloss_up['Fin_GainLoss'].loc[Stat_Profloss_up.index[i]])
+    filler_ids = []
+    while len(filler_ids) < 100:
+        filler_ids.append(str(uuid.uuid4()))
         
-    # filler_ids = [str(uuid.uuid4()) for i in range(22)]
-    filler_ids = [    "ace3a15f-7306-4bb3-ad25-ab4251d6dfff",    "4a55e941-dd42-4f9d-a867-0a0396d94a21",    "743c0ab8-4a8a-4fe9-aee0-d853deb1f43d",    "e8fc830b-3b98-49e1-b199-9c8030f75191",    "5fa9696f-7280-4ea3-b475-2db3c0b085c3",    "e280de91-9672-4446-841b-9d49c415fecc",    "9a887fc7-b823-4519-a599-dbb12bec543b",    "89ec0703-b707-448c-a3a2-dbef3fa530c4",    "fed7afc3-8527-44fd-b14b-8792277efd6f",    "8a53593d-cf43-49c7-adc1-31694df7b3f2",    "2bb2c509-a84b-4475-b766-45ef800d3e21",    "d831cc06-5a0c-46e9-ac60-9f9554d7bfce",    "bd994325-e135-4590-b5a2-f2e73b689aef",    "0df1a518-269f-4127-bb58-00c369cb8e09",    "5a823654-6a4f-4f2a-8393-021331abcbde",    "2072d0b9-2701-43ba-995a-788bcf043b44",    "3ad17a3c-f5ad-4dda-aa74-66800ef5ee10",    "849b31a5-3637-4450-ac21-ff88250a53e7",    "f1beffa0-96fc-43ab-80e2-1c1f2324a903",    "293c42db-926e-4455-a9a4-806a82ae8a84",    "885ca9fc-b4e4-41b0-b8b5-5fbebd5b75fc",    "3771711e-1c55-422f-9205-fd55c343b34d"]
-    active_flags = [1] * 22    
-    created_bys = ['User1','User2','User3','User4','User5','User6','User7','User8','User9','User10','User11','User12','User13','User14','User15','User16','User17','User18','User19','User20','User21','User22']
-    
-    created_dates = [datetime.now()] * 22
-    modified_bys = ['User1','User2','User3','User4','User5','User6','User7','User8','User9','User10','User11','User12','User13','User14','User15','User16','User17','User18','User19','User20','User21','User22']
-    modified_dates = [datetime.now()] * 22   
+    active_flags = [1] * 100
+    created_bys = ["Infogis_User"] * 100
+    modified_bys = ["Infogis_User"] * 100   
+    created_dates = [datetime.now()] * 100
+    modified_dates = [datetime.now()] * 100   
     
     actual_cashflow = actual_cashflow_updated.reset_index()
-    actual_cashflow['Run_ID'] = filler_ids[:22]
-    actual_cashflow['Actual_Cashflow_ID'] = filler_ids[:22]
-    actual_cashflow['Active_Flag'] = active_flags[:22]
-    actual_cashflow['Created_By'] = created_bys[:22]
-    actual_cashflow['Created_Date'] = created_dates[:22]
-    actual_cashflow['Modified_By'] = modified_bys[:22]
-    actual_cashflow['Modified_Date'] = modified_dates[:22]
+    actual_cashflow['Run_ID'] = filler_ids[:len(actual_cashflow)]
+    actual_cashflow['Actual_Cashflow_ID'] = filler_ids[:len(actual_cashflow)]
+    actual_cashflow['Active_Flag'] = active_flags[:len(actual_cashflow)]
+    actual_cashflow['Created_By'] = created_bys[:len(actual_cashflow)]
+    actual_cashflow['Created_Date'] = created_dates[:len(actual_cashflow)]
+    actual_cashflow['Modified_By'] = modified_bys[:len(actual_cashflow)]
+    actual_cashflow['Modified_Date'] = modified_dates[:len(actual_cashflow)]
     
     run = pd.DataFrame()
-    run['Run_ID'] = filler_ids[:22]
-    run['Run_Name']=['run1','run2','run3','run4','run5','run6','run7','run8','run9','run10','run11','run12','run13','run14','run15','run16','run17','run18','run19','run20','run21','run22']
-    run['Conf_ID'] = filler_ids[:22]
-    run['Reporting_Date']=[datetime.now()] * 22
-    run['Active_Flag'] = active_flags[:22]
-    run['Created_By'] = created_bys[:22]
-    run['Created_Date'] = created_dates[:22]
-    run['Modified_By'] = modified_bys[:22]
-    run['Modified_Date'] = modified_dates[:22]
+    run['Run_ID'] = filler_ids[:len(coverage_uni_recon_updated)]
+    run['Run_Name']= [run_name] * len(coverage_uni_recon_updated)
+    run['Conf_ID'] = [conf_id] * len(coverage_uni_recon_updated)
+    run['Reporting_Date']=[datetime.now()] * len(coverage_uni_recon_updated)
+    run['Active_Flag'] = active_flags[:len(coverage_uni_recon_updated)]
+    run['Created_By'] = created_bys[:len(coverage_uni_recon_updated)]
+    run['Created_Date'] = created_dates[:len(coverage_uni_recon_updated)]
+    run['Modified_By'] = modified_bys[:len(coverage_uni_recon_updated)]
+    run['Modified_Date'] = modified_dates[:len(coverage_uni_recon_updated)]
     
     coverage_uni_recon = coverage_uni_recon_updated.reset_index()
-    coverage_uni_recon['Coverage_Units_Rec_ID'] = filler_ids[:22]
-    coverage_uni_recon['Run_ID'] = filler_ids[:22]
-    coverage_uni_recon['Active_Flag'] = active_flags[:22]
-    coverage_uni_recon['Created_By'] = created_bys[:22]
-    coverage_uni_recon['Created_Date'] = created_dates[:22]
-    coverage_uni_recon['Modified_By'] = modified_bys[:22]
-    coverage_uni_recon['Modified_Date'] = modified_dates[:22] 
+    coverage_uni_recon['Coverage_Units_Rec_ID'] = filler_ids[:len(coverage_uni_recon)]
+    coverage_uni_recon['Run_ID'] = filler_ids[:len(coverage_uni_recon)]
+    coverage_uni_recon['Active_Flag'] = active_flags[:len(coverage_uni_recon)]
+    coverage_uni_recon['Created_By'] = created_bys[:len(coverage_uni_recon)]
+    coverage_uni_recon['Created_Date'] = created_dates[:len(coverage_uni_recon)]
+    coverage_uni_recon['Modified_By'] = modified_bys[:len(coverage_uni_recon)]
+    coverage_uni_recon['Modified_Date'] = modified_dates[:len(coverage_uni_recon)] 
     
     
     Liab_init_reco = Liab_init_reco.reset_index()
     
     liability_init_rec = pd.DataFrame() 
-    liability_init_rec['Liability_Init_Rec_ID'] = filler_ids[:1]
-    liability_init_rec['Run_ID'] = filler_ids[:1]
+    liability_init_rec['Liability_Init_Rec_ID'] = filler_ids[:len(Liab_init_reco)]
+    liability_init_rec['Run_ID'] = filler_ids[:len(Liab_init_reco)]
     liability_init_rec['index'] = Liab_init_reco['index']
     liability_init_rec['PV_Prem'] = Liab_init_reco['PV_Prem']
     liability_init_rec['PV_RenComm'] = Liab_init_reco['PV_RenComm']
@@ -596,17 +596,17 @@ def calculate(df_temp):
     liability_init_rec['Total'] = Liab_init_reco['Total']
     liability_init_rec['CSM_Init'] = Liab_init_reco['CSM_Init']
     liability_init_rec['Liab_Init'] = Liab_init_reco['Liab_Init']
-    liability_init_rec['Active_Flag'] = active_flags[:1]
-    liability_init_rec['Created_By'] = created_bys[:1]
-    liability_init_rec['Created_Date'] = created_dates[:1]
-    liability_init_rec['Modified_By'] = modified_bys[:1]
-    liability_init_rec['Modified_Date'] = modified_dates[:1]
+    liability_init_rec['Active_Flag'] = active_flags[:len(Liab_init_reco)]
+    liability_init_rec['Created_By'] = created_bys[:len(Liab_init_reco)]
+    liability_init_rec['Created_Date'] = created_dates[:len(Liab_init_reco)]
+    liability_init_rec['Modified_By'] = modified_bys[:len(Liab_init_reco)]
+    liability_init_rec['Modified_Date'] = modified_dates[:len(Liab_init_reco)]
     
     Rec_BEL_updated = Rec_BEL_updated.reset_index()
     
     rec_bel = pd.DataFrame()
-    rec_bel['Rec_BEL_ID'] = filler_ids[:22]
-    rec_bel['Run_ID'] = filler_ids[:22]
+    rec_bel['Rec_BEL_ID'] = filler_ids[:len(Rec_BEL_updated)]
+    rec_bel['Run_ID'] = filler_ids[:len(Rec_BEL_updated)]
     rec_bel['index'] = Rec_BEL_updated['index']
     rec_bel['Opening'] = Rec_BEL_updated['Opening']
     rec_bel['NewBusiness'] = Rec_BEL_updated['NewBusiness']
@@ -617,18 +617,18 @@ def calculate(df_temp):
     rec_bel['Changes_Exp'] = Rec_BEL_updated['Changes_Exp']
     rec_bel['Changes_Rel'] = Rec_BEL_updated['Changes_Rel']
     rec_bel['Closes'] = Rec_BEL_updated['Closes']
-    rec_bel['Active_Flag'] = active_flags[:22]
-    rec_bel['Created_By'] = created_bys[:22]
-    rec_bel['Created_Date'] = created_dates[:22]
-    rec_bel['Modified_By'] = modified_bys[:22]
-    rec_bel['Modified_Date'] = modified_dates[:22]
+    rec_bel['Active_Flag'] = active_flags[:len(Rec_BEL_updated)]
+    rec_bel['Created_By'] = created_bys[:len(Rec_BEL_updated)]
+    rec_bel['Created_Date'] = created_dates[:len(Rec_BEL_updated)]
+    rec_bel['Modified_By'] = modified_bys[:len(Rec_BEL_updated)]
+    rec_bel['Modified_Date'] = modified_dates[:len(Rec_BEL_updated)]
     
     
     Rec_RA_updated = Rec_RA_updated.reset_index()
     
     rec_ra = pd.DataFrame()
-    rec_ra['Rec_RA_ID'] = filler_ids[:22]
-    rec_ra['Run_ID'] = filler_ids[:22]
+    rec_ra['Rec_RA_ID'] = filler_ids[:len(Rec_RA_updated)]
+    rec_ra['Run_ID'] = filler_ids[:len(Rec_RA_updated)]
     rec_ra['index'] = Rec_RA_updated['index']
     rec_ra['Opening'] = Rec_RA_updated['Opening']
     rec_ra['NewBusiness'] = Rec_RA_updated['NewBusiness']
@@ -639,17 +639,17 @@ def calculate(df_temp):
     rec_ra['Changes_Exp'] = Rec_RA_updated['Changes_Exp']
     rec_ra['Changes_Rel'] = Rec_RA_updated['Changes_Rel']
     rec_ra['Closes'] = Rec_RA_updated['Closes']
-    rec_ra['Active_Flag'] = active_flags[:22]
-    rec_ra['Created_By'] = created_bys[:22]
-    rec_ra['Created_Date'] = created_dates[:22]
-    rec_ra['Modified_By'] = modified_bys[:22]
-    rec_ra['Modified_Date'] = modified_dates[:22]
+    rec_ra['Active_Flag'] = active_flags[:len(Rec_RA_updated)]
+    rec_ra['Created_By'] = created_bys[:len(Rec_RA_updated)]
+    rec_ra['Created_Date'] = created_dates[:len(Rec_RA_updated)]
+    rec_ra['Modified_By'] = modified_bys[:len(Rec_RA_updated)]
+    rec_ra['Modified_Date'] = modified_dates[:len(Rec_RA_updated)]
     
     Rec_CSM_updated = Rec_CSM_updated.reset_index()
     
     rec_csm = pd.DataFrame()
-    rec_csm['Rec_CSM_ID'] = filler_ids[:22]
-    rec_csm['Run_ID'] = filler_ids[:22]
+    rec_csm['Rec_CSM_ID'] = filler_ids[:len(Rec_CSM_updated)]
+    rec_csm['Run_ID'] = filler_ids[:len(Rec_CSM_updated)]
     rec_csm['index'] = Rec_CSM_updated['index']
     rec_csm['Opening'] = Rec_CSM_updated['Opening']
     rec_csm['NewBusiness'] = Rec_CSM_updated['NewBusiness']
@@ -660,18 +660,18 @@ def calculate(df_temp):
     rec_csm['Changes_Exp'] = Rec_CSM_updated['Changes_Exp']
     rec_csm['Changes_Rel'] = Rec_CSM_updated['Changes_Rel']
     rec_csm['Closes'] = Rec_CSM_updated['Closes']
-    rec_csm['Loss_Comp'] = [0] * 22
-    rec_csm['Active_Flag'] = active_flags[:22]
-    rec_csm['Created_By'] = created_bys[:22]
-    rec_csm['Created_Date'] = created_dates[:22]
-    rec_csm['Modified_By'] = modified_bys[:22]
-    rec_csm['Modified_Date'] = modified_dates[:22]
+    rec_csm['Loss_Comp'] = [0] * len(Rec_CSM_updated)
+    rec_csm['Active_Flag'] = active_flags[:len(Rec_CSM_updated)]
+    rec_csm['Created_By'] = created_bys[:len(Rec_CSM_updated)]
+    rec_csm['Created_Date'] = created_dates[:len(Rec_CSM_updated)]
+    rec_csm['Modified_By'] = modified_bys[:len(Rec_CSM_updated)]
+    rec_csm['Modified_Date'] = modified_dates[:len(Rec_CSM_updated)]
     
     Rec_TotContLiab_up = Rec_TotContLiab_up.reset_index()
     
     rec_totcontliab = pd.DataFrame()
-    rec_totcontliab['Rec_TotContLiab_ID'] = filler_ids[:22]
-    rec_totcontliab['Run_ID'] = filler_ids[:22]
+    rec_totcontliab['Rec_TotContLiab_ID'] = filler_ids[:len(Rec_TotContLiab_up)]
+    rec_totcontliab['Run_ID'] = filler_ids[:len(Rec_TotContLiab_up)]
     rec_totcontliab['index'] = Rec_TotContLiab_up['index']
     rec_totcontliab['Opening'] = Rec_TotContLiab_up['Opening']
     rec_totcontliab['NewBusiness'] = Rec_TotContLiab_up['NewBusiness']
@@ -682,33 +682,33 @@ def calculate(df_temp):
     rec_totcontliab['Changes_Exp'] = Rec_TotContLiab_up['Changes_Exp']
     rec_totcontliab['Changes_Rel'] = Rec_TotContLiab_up['Changes_Rel']
     rec_totcontliab['Closes'] = Rec_TotContLiab_up['Closes']
-    rec_totcontliab['Active_Flag'] = active_flags[:22]
-    rec_totcontliab['Created_By'] = created_bys[:22]
-    rec_totcontliab['Created_Date'] = created_dates[:22]
-    rec_totcontliab['Modified_By'] = modified_bys[:22]
-    rec_totcontliab['Modified_Date'] = modified_dates[:22]
+    rec_totcontliab['Active_Flag'] = active_flags[:len(Rec_TotContLiab_up)]
+    rec_totcontliab['Created_By'] = created_bys[:len(Rec_TotContLiab_up)]
+    rec_totcontliab['Created_Date'] = created_dates[:len(Rec_TotContLiab_up)]
+    rec_totcontliab['Modified_By'] = modified_bys[:len(Rec_TotContLiab_up)]
+    rec_totcontliab['Modified_Date'] = modified_dates[:len(Rec_TotContLiab_up)]
     
     Rec_AcqExpMor_up = Rec_AcqExpMor_up.reset_index()
     
     rec_acqexpmor_up = pd.DataFrame()
-    rec_acqexpmor_up['Rec_AcqExpMor_ID'] = filler_ids[:22]
-    rec_acqexpmor_up['Run_ID'] = filler_ids[:22]
+    rec_acqexpmor_up['Rec_AcqExpMor_ID'] = filler_ids[:len(Rec_AcqExpMor_up)]
+    rec_acqexpmor_up['Run_ID'] = filler_ids[:len(Rec_AcqExpMor_up)]
     rec_acqexpmor_up['index'] = Rec_AcqExpMor_up['index']
     rec_acqexpmor_up['Opening'] = Rec_AcqExpMor_up['Opening']
     rec_acqexpmor_up['NewAcqExp'] = Rec_AcqExpMor_up['NewAcqExp']
     rec_acqexpmor_up['AccIntr'] = Rec_AcqExpMor_up['AccIntr']
     rec_acqexpmor_up['AmorExp'] = Rec_AcqExpMor_up['AmorExp']
     rec_acqexpmor_up['Closes'] = Rec_AcqExpMor_up['Closes']
-    rec_acqexpmor_up['Active_Flag'] = active_flags[:22]
-    rec_acqexpmor_up['Created_By'] = created_bys[:22]
-    rec_acqexpmor_up['Created_Date'] = created_dates[:22]
-    rec_acqexpmor_up['Modified_By'] = modified_bys[:22]
-    rec_acqexpmor_up['Modified_Date'] = modified_dates[:22]
+    rec_acqexpmor_up['Active_Flag'] = active_flags[:len(Rec_AcqExpMor_up)]
+    rec_acqexpmor_up['Created_By'] = created_bys[:len(Rec_AcqExpMor_up)]
+    rec_acqexpmor_up['Created_Date'] = created_dates[:len(Rec_AcqExpMor_up)]
+    rec_acqexpmor_up['Modified_By'] = modified_bys[:len(Rec_AcqExpMor_up)]
+    rec_acqexpmor_up['Modified_Date'] = modified_dates[:len(Rec_AcqExpMor_up)]
     
     stat_profloss_up = Stat_Profloss_up
-    stat_profloss_up['Stat_Profloss_ID'] = filler_ids[:22]
-    stat_profloss_up['Run_ID'] = filler_ids[:22]
-    stat_profloss_up['index'] = [i for i in range(22)]
+    stat_profloss_up['Stat_Profloss_ID'] = filler_ids[:len(Stat_Profloss_up)]
+    stat_profloss_up['Run_ID'] = filler_ids[:len(Stat_Profloss_up)]
+    stat_profloss_up['index'] = [i for i in range(len(Stat_Profloss_up))]
     stat_profloss_up['Rel_CSM'] = Stat_Profloss_up['Rel_CSM']
     stat_profloss_up['Rel_RA'] = Stat_Profloss_up['Rel_RA']
     stat_profloss_up['Exp_Claim'] = Stat_Profloss_up['Exp_Claim']
@@ -724,22 +724,22 @@ def calculate(df_temp):
     stat_profloss_up['Ins_FinExp'] = Stat_Profloss_up['Ins_FinExp']
     stat_profloss_up['Fin_GainLoss'] = Stat_Profloss_up['Fin_GainLoss']
     stat_profloss_up['Prof_loss'] = Stat_Profloss_up['Prof_loss']
-    stat_profloss_up['Active_Flag'] = active_flags[:22]
-    stat_profloss_up['Created_By'] = created_bys[:22]
-    stat_profloss_up['Created_Date'] = created_dates[:22]
-    stat_profloss_up['Modified_By'] = modified_bys[:22]
-    stat_profloss_up['Modified_Date'] = modified_dates[:22]
+    stat_profloss_up['Active_Flag'] = active_flags[:len(Stat_Profloss_up)]
+    stat_profloss_up['Created_By'] = created_bys[:len(Stat_Profloss_up)]
+    stat_profloss_up['Created_Date'] = created_dates[:len(Stat_Profloss_up)]
+    stat_profloss_up['Modified_By'] = modified_bys[:len(Stat_Profloss_up)]
+    stat_profloss_up['Modified_Date'] = modified_dates[:len(Stat_Profloss_up)]
     
     
     
     run_input = df_temp
-    run_input['Run_ID'] = filler_ids[:22]
-    run_input['Run_Input_ID'] = filler_ids[:22]
-    run_input['Active_Flag'] = active_flags[:22]
-    run_input['Created_By'] = created_bys[:22]
-    run_input['Created_Date'] = created_dates[:22]
-    run_input['Modified_By'] = modified_bys[:22]
-    run_input['Modified_Date'] = modified_dates[:22]
+    run_input['Run_ID'] = filler_ids[:len(df_temp)]
+    run_input['Run_Input_ID'] = filler_ids[:len(df_temp)]
+    run_input['Active_Flag'] = active_flags[:len(df_temp)]
+    run_input['Created_By'] = created_bys[:len(df_temp)]
+    run_input['Created_Date'] = created_dates[:len(df_temp)]
+    run_input['Modified_By'] = modified_bys[:len(df_temp)]
+    run_input['Modified_Date'] = modified_dates[:len(df_temp)]
     
     return run,run_input,coverage_uni_recon, actual_cashflow, liability_init_rec, rec_bel, rec_ra, rec_csm, rec_totcontliab, rec_acqexpmor_up , stat_profloss_up
 
@@ -749,7 +749,7 @@ def enter_details_to_db():
     input_data = pd.read_csv(r"New_Data_Random_inputs.csv",index_col=0)
     input_data1=input_data.loc[0]
     
-    run , run_input,coverage_uni_recon, actual_cashflow, Liab_init_reco, Rec_BEL_updated, Rec_RA_updated, Rec_CSM_updated, Rec_TotContLiab_up, Rec_AcqExpMor_up, Stat_Profloss_up = calculate(input_data1)
+    run , run_input,coverage_uni_recon, actual_cashflow, Liab_init_reco, Rec_BEL_updated, Rec_RA_updated, Rec_CSM_updated, Rec_TotContLiab_up, Rec_AcqExpMor_up, Stat_Profloss_up = calculate(input_data1,"run_name","conf_id","19-10-2024")
     
     coverage_uni_recon.to_csv('coverage_uni_recon.csv')
     actual_cashflow.to_csv('actual_cashflow.csv')
