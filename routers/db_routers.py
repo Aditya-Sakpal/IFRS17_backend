@@ -1,315 +1,376 @@
-from datetime import datetime
-from typing import List, Dict, Any
-import pytz
+import os
 import traceback
+from datetime import datetime
+import pytz
+import tempfile 
 import uuid
 
-
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import pandas as pd
 from sqlalchemy import text
 
-from db_related.connect import get_db, engine
-from models.user_management import User, UserGroup
+from db_related.connect import get_db,engine
+from main_exec_func2 import calculate , IFRS4_calculate , GMMvsIFRS4
 from models.calculation import Run , RunInput , CoverageUnitsRec , CashFlow , Liability_Init_Rec , Rec_Bel_Updated 
-from constants.misc import TABLE_MODEL_MAPPING
-from schemas.db_schemas import CreateUserRequest, CreateUserGroupRequest 
 
 router = APIRouter()
 
-@router.post("/user", status_code=201)
-def create_users(users: List[CreateUserRequest], db: Session = Depends(get_db)):
-    """
-    This function is used to create multiple new users.
-    
-    Args:
-        users: List of CreateUserRequest objects
-        db: database connection object
-    
-    Returns:
-        dict: message and a list of created User_IDs
-    """
-    created_users = []
-
-    for user in users:
-        user_group = db.query(UserGroup).filter(UserGroup.User_Group_Name == user.User_Group).first()
-
-        if not user_group:
-            raise HTTPException(status_code=400, detail=f"UserGroup '{user.User_Group}' does not exist")
-
-        new_user = User(
-            User_Name=user.User_Name,
-            User_Group=user.User_Group,
-            Email_ID=user.Email_ID,
-            User_Desc=user.User_Desc,
-            Active_Flag=user.Active_Flag,
-            Created_By=user.Created_By,
-            Created_Date=datetime.utcnow(),
-        )
-        
-        db.add(new_user)
-        db.flush()  # Generate User_ID before committing
-        created_users.append({"User_Name": new_user.User_Name, "User_ID": new_user.User_ID})
-    
-    db.commit()
-
-    return {"message": "Users created successfully", "created_users": created_users}
-
-@router.post("/usergroup", status_code=201)
-def create_user_groups(user_groups: List[CreateUserGroupRequest], db: Session = Depends(get_db)):
-    """
-    This function is used to create multiple new UserGroups.
-
-    Args:
-        user_groups: List of CreateUserGroupRequest objects
-        db: database connection object
-
-    Returns:
-        dict: message and a list of created User_Group_IDs
-    """
-    created_user_groups = []
-
-    for user_group in user_groups:
-        existing_user_group = db.query(UserGroup).filter(UserGroup.User_Group_Name == user_group.User_Group_Name).first()
-        
-        if existing_user_group:
-            raise HTTPException(status_code=400, detail=f"UserGroup '{user_group.User_Group_Name}' already exists")
-
-        new_user_group = UserGroup(
-            User_Group_Name=user_group.User_Group_Name,
-            User_Group_Desc=user_group.User_Group_Desc,
-            Active_Flag=user_group.Active_Flag,
-            Created_By=user_group.Created_By,
-            Created_Date=datetime.utcnow(),
-        )
-
-        db.add(new_user_group)
-        db.flush()  # Generate User_Group_ID before committing
-        created_user_groups.append({"User_Group_Name": new_user_group.User_Group_Name, "User_Group_ID": new_user_group.User_Group_ID})
-    
-    db.commit()
-
-    return {"message": "UserGroups created successfully", "created_user_groups": created_user_groups}
-
-@router.post("/insert/{table_name}", status_code=201)
-def insert_records(
-    table_name: str,
-    records: List[Dict[str, Any]],
-    db: Session = Depends(get_db)
-):
-    """
-    Generic route to insert records into any table.
-
-    Args:
-        table_name: Name of the table to insert records into.
-        records: List of dictionaries representing records to insert.
-        db: Database session.
-
-    Returns:
-        dict: Message and a list of created record IDs.
-    """
-    if table_name not in TABLE_MODEL_MAPPING:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Table '{table_name}' is not recognized."
-        )
-
-    model = TABLE_MODEL_MAPPING[table_name]
-
-    created_records = []
-
-    for record_data in records:
-        if "Created_By" in record_data:
-            created_by_user = db.query(User).filter(User.User_Name == record_data["Created_By"]).first()
-            if not created_by_user:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"User '{record_data['Created_By']}' does not exist."
-                )
-
-        if "Modified_By" in record_data and record_data["Modified_By"]:
-            modified_by_user = db.query(User).filter(User.User_Name == record_data["Modified_By"]).first()
-            if not modified_by_user:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"User '{record_data['Modified_By']}' does not exist."
-                )
-                
-        if table_name != "Run":
-            if "Run_ID" in record_data:
-                run = db.query(Run).filter(Run.Run_ID == record_data["Run_ID"]).first()
-                if not run:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Run with ID '{record_data['Run_ID']}' does not exist."
-                    )
-        else :
-            run = db.query(Run).filter(Run.Run_ID == record_data["Run_ID"]).first()
-            if run:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Run with ID '{record_data['Run_ID']}' already exists."
-                )
-
-        try:
-            new_record = model(**record_data)
-        except TypeError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid fields in record data: {str(e)}"
-            )
-
-        db.add(new_record)
-        db.flush()  
-
-        created_records.append({
-            "table_name": table_name,
-            "record_id": getattr(new_record, f"{model.__tablename__}_ID", None)
-        })
-
-    db.commit()
-
-    return {"message": "Records inserted successfully", "created_records": created_records}
-
-
-run_input_df = pd.read_csv('New_Data_Random_inputs.csv')
-
-actual_cashflow_df = pd.read_csv('actual_cashflow.csv')
-actual_cashflow_df = actual_cashflow_df.drop(columns=['Unnamed: 0'])
-actual_cashflow_df['Active_Flag'] = [True]*len(actual_cashflow_df)
-# actual_cashflow_df[]
-
-coverage_uni_recon_df = pd.read_csv('coverage_uni_recon.csv')
-coverage_uni_recon_df = coverage_uni_recon_df.drop(columns=['Unnamed: 0'])
-coverage_uni_recon_df['Active_Flag'] = [True]*len(coverage_uni_recon_df)
-
-liab_init_reco_df = pd.read_csv('Liab_init_reco.csv')
-liab_init_reco_df = liab_init_reco_df.drop(columns=['Unnamed: 0'])
-liab_init_reco_df['Active_Flag'] = [True]*len(liab_init_reco_df)
-
-rec_acpexpmor_up_df = pd.read_csv('Rec_AcqExpMor_up.csv')
-rec_acpexpmor_up_df = rec_acpexpmor_up_df.drop(columns=['Unnamed: 0'])
-rec_acpexpmor_up_df['Active_Flag'] = [True]*len(rec_acpexpmor_up_df)
-
-rec_bel_updated_df = pd.read_csv('Rec_BEL_updated.csv')
-rec_bel_updated_df = rec_bel_updated_df.drop(columns=['Unnamed: 0'])
-rec_bel_updated_df['Active_Flag'] = [True]*len(rec_bel_updated_df)
-
-rec_csm_updated_df = pd.read_csv('Rec_CSM_updated.csv')
-rec_csm_updated_df = rec_csm_updated_df.drop(columns=['Unnamed: 0'])
-rec_csm_updated_df['Active_Flag'] = [True]*len(rec_csm_updated_df)
-
-rec_ra_updated_df = pd.read_csv('Rec_RA_updated.csv')
-rec_ra_updated_df = rec_ra_updated_df.drop(columns=['Unnamed: 0'])
-rec_ra_updated_df['Active_Flag'] = [True]*len(rec_ra_updated_df)
-
-rec_totcontliab_up_df = pd.read_csv('Rec_TotContLiab_up.csv')
-rec_totcontliab_up_df = rec_totcontliab_up_df.drop(columns=['Unnamed: 0'])
-rec_totcontliab_up_df['Active_Flag'] = [True]*len(rec_totcontliab_up_df)
-
-stat_profloss_up_df = pd.read_csv('Stat_Profloss_up.csv')
-stat_profloss_up_df = stat_profloss_up_df.drop(columns=['Unnamed: 0'])
-stat_profloss_up_df['Active_Flag'] = [True]*len(stat_profloss_up_df)
-
-
-@router.post("/insert_new_run", status_code=201)
-def after_run(
-    records: List[Dict], 
+@router.post('/insert_new_run')
+async def insert_run(
+    file: UploadFile = File(...),
+    run_name: str = Form(...),
     db: Session = Depends(get_db)
 ):
     try:
-        # Check for existing Run
-        run = db.query(Run).filter(Run.Run_ID == records[0]['Run_ID']).first()
-        
-        if run:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Run with ID '{records[0]['Run_ID']}' already exists."
-            )
-        
-        # Insert into Run table
-        new_run = Run(
-            Run_ID=records[0]['Run_ID'],
-            Run_Name=records[0]['Run_Name'],
-            Conf_ID=records[0]['Conf_ID'],
-            Reporting_Date=records[0]['Reporting_Date'],
-            Active_Flag=True,
-            Created_By=records[0]['Created_By'],
-            Created_Date=datetime.now(pytz.utc)
-        )
-        db.add(new_run)
-        db.flush()
-        
-        actual_cashflow_df['Actual_Cashflow_ID'] = [uuid.uuid4() for _ in range(len(list(actual_cashflow_df['Actual_Cashflow_ID'])))]
-        actual_cashflow_df['Run_ID'] = [records[0]['Run_ID']]*len(actual_cashflow_df)
-        coverage_uni_recon_df['Coverage_Units_Rec_ID'] = [uuid.uuid4() for _ in range(len(list(coverage_uni_recon_df['Coverage_Units_Rec_ID'])))]
-        coverage_uni_recon_df['Run_ID'] = [records[0]['Run_ID']]*len(coverage_uni_recon_df)
-        liab_init_reco_df['Liability_Init_Rec_ID'] = [uuid.uuid4() for _ in range(len(list(liab_init_reco_df['Liability_Init_Rec_ID'])))]
-        liab_init_reco_df['Run_ID'] = [records[0]['Run_ID']]*len(liab_init_reco_df)
-        rec_acpexpmor_up_df['Rec_AcqExpMor_ID'] = [uuid.uuid4() for _ in range(len(list(rec_acpexpmor_up_df['Rec_AcqExpMor_ID'])))]
-        rec_acpexpmor_up_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_acpexpmor_up_df)
-        rec_bel_updated_df['Rec_BEL_ID'] = [uuid.uuid4() for _ in range(len(list(rec_bel_updated_df['Rec_BEL_ID'])))]
-        rec_bel_updated_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_bel_updated_df)
-        rec_csm_updated_df['Rec_CSM_ID'] = [uuid.uuid4() for _ in range(len(list(rec_csm_updated_df['Rec_CSM_ID'])))]
-        rec_csm_updated_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_csm_updated_df)
-        rec_ra_updated_df['Rec_RA_ID'] = [uuid.uuid4() for _ in range(len(list(rec_ra_updated_df['Rec_RA_ID'])))]
-        rec_ra_updated_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_ra_updated_df)
-        rec_totcontliab_up_df['Rec_TotContLiab_ID'] = [uuid.uuid4() for _ in range(len(list(rec_totcontliab_up_df['Rec_TotContLiab_ID'])))]
-        rec_totcontliab_up_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_totcontliab_up_df)
-        stat_profloss_up_df['Stat_Profloss_ID'] = [uuid.uuid4() for _ in range(len(list(stat_profloss_up_df['Stat_Profloss_ID'])))]
-        stat_profloss_up_df['Run_ID'] = [records[0]['Run_ID']]*len(stat_profloss_up_df)
-        
-        # Insert into RunInput table
-        run_input_sample_record = run_input_df.sample(1)
-        new_run_input = RunInput(
-            Run_ID=records[0]['Run_ID'],
-            Run_Input_ID=records[0]['Run_ID'],
-            Sum_Assured=int(run_input_sample_record['sum_assured'].values[0]),
-            Num_Policies=int(run_input_sample_record['Num_Policies'].values[0]),
-            Policy_Fees=int(run_input_sample_record['policy_fees'].values[0]),
-            Prem_Rate_Per1000=float(run_input_sample_record['prem_rate_per1000'].values[0]),
-            Policy_Init_Com=float(run_input_sample_record['policy_Init_comm'].values[0]),
-            Policy_Yrly_Com=float(run_input_sample_record['policy_yearly_comm'].values[0]),
-            Acq_Direct_Expenses=int(run_input_sample_record['acq_direct_expenses'].values[0]),
-            Acq_Indirect_Expense=int(run_input_sample_record['acq_indirect_expense'].values[0]),
-            Main_Direct_Expenses=int(run_input_sample_record['main_direct_expenses'].values[0]),
-            Main_Indirect_Expenses=int(run_input_sample_record['main_indirect_expenses'].values[0]),
-            Total_Years=int(run_input_sample_record['Total_years'].values[0]),
-            Discount_Rate=float(run_input_sample_record['discount_rate'].values[0]),
-            Asset_Ret_Rate=float(run_input_sample_record['asset_ret_rate'].values[0]),
-            CSM_Ret_Rate=float(run_input_sample_record['CSM_ret_Rate'].values[0]),
-            Risk_Adjst_Rate=float(run_input_sample_record['risk_adjst_rate'].values[0]),
-            Mortality=float(run_input_sample_record['mortality'].values[0]),
-            Lapse=float(run_input_sample_record['lapse'].values[0]),
-            Active_Flag=True,
-            Created_By=records[0]['Created_By'],
-            Created_Date=datetime.now(pytz.utc)
-        )
-        db.add(new_run_input)
-        db.flush()
-        db.commit()
+        temp_dir = tempfile.gettempdir()
+        temp_file_path = os.path.join(temp_dir, file.filename)
 
-                
-        with engine.begin() as conn: 
-            actual_cashflow_df.to_sql('Actual_Cashflow',schema='Calculation',con=conn, if_exists='append', index=False)
-            coverage_uni_recon_df.to_sql('Coverage_Units_Rec',schema='Calculation',con=conn, if_exists='append', index=False)
-            liab_init_reco_df.to_sql('Liability_Init_Rec',schema='Calculation',con=conn, if_exists='append', index=False)
-            rec_acpexpmor_up_df.to_sql('Rec_AcqExpMor',schema='Calculation',con=conn, if_exists='append', index=False)
-            rec_bel_updated_df.to_sql('Rec_BEL',schema='Calculation',con=conn, if_exists='append', index=False)
-            rec_csm_updated_df.to_sql('Rec_CSM',schema='Calculation',con=conn, if_exists='append', index=False)
-            rec_ra_updated_df.to_sql('Rec_RA',schema='Calculation',con=conn, if_exists='append', index=False)
-            rec_totcontliab_up_df.to_sql('Rec_TotContLiab',schema='Calculation',con=conn, if_exists='append', index=False)
-            stat_profloss_up_df.to_sql('Stat_Profloss',schema='Calculation',con=conn, if_exists='append', index=False)
-            
-        db.commit()
+        with open(temp_file_path, "wb") as f:
+            f.write(await file.read())
 
-        return {"message": "Records inserted successfully"}
-    
+        df = pd.read_csv(temp_file_path)
+        
+        run_id = str(uuid.uuid4())
+        conf_id = str(uuid.uuid4())
+        reporting_date = datetime.now(pytz.utc).date()
+        active_flag = True
+        created_by = "Infogis_User"
+        created_date = datetime.now(pytz.utc)
+        modified_by = "Infogis_User"
+        modified_date = datetime.now(pytz.utc)
+        
+        ifrs17_data = calculate(df)
+        ifrs4_data = IFRS4_calculate(df)
+        comp = GMMvsIFRS4(ifrs17_data,ifrs4_data)
+
+        coverage_units_rec = ifrs17_data['Coverage Units Reconciliation']
+        actual_cashflow = ifrs17_data['Actual Risk Adjustment CFs']
+        liab_init_reco = ifrs17_data['Liability on Initial Recognition']
+        rec_bel = ifrs17_data['Reconciliation of Best Estimate Liabilities']
+        rec_ra = ifrs17_data['Reconciliation of Risk Adjustment']
+        rec_csm = ifrs17_data['Reconciliation of Contractual Service Margin']
+        rec_totcontliab_up = ifrs17_data['Reconciliation of Total Contract Liability']
+        rec_acqexpmor_up = ifrs17_data['Reconciliation of Acquisition Expense Amortization']
+        stat_profloss_up = ifrs17_data['Statement of Profit or Loss']
+        
+        run = pd.DataFrame({
+            "Run_ID": [run_id],
+            "Run_Name": [run_name],
+            "Conf_ID": [conf_id],
+            "Reporting_Date": [reporting_date],
+            "Active_Flag": [active_flag],
+            "Created_By": [created_by],
+            "Created_Date": [created_date],
+            "Modified_By": [modified_by],
+            "Modified_Date": [modified_date]
+        })
+        coverage_units_rec['Coverage_Units_Rec_ID'] = [str(uuid.uuid4()) for _ in range(len(coverage_units_rec))] 
+        coverage_units_rec['Run_ID'] = [run_id] * len(coverage_units_rec)
+        coverage_units_rec['Active_Flag'] = [active_flag] * len(coverage_units_rec)
+        coverage_units_rec['Created_By'] = [created_by] * len(coverage_units_rec)
+        coverage_units_rec['Created_Date'] = [created_date] * len(coverage_units_rec)
+        coverage_units_rec['Modified_By'] = [modified_by] * len(coverage_units_rec)
+        coverage_units_rec['Modified_Date'] = [modified_date] * len(coverage_units_rec)
+        
+        actual_cashflow['Actual_Cashflow_ID'] = [str(uuid.uuid4()) for _ in range(len(actual_cashflow))]
+        actual_cashflow['Run_ID'] = [run_id] * len(actual_cashflow)
+        actual_cashflow['Active_Flag'] = [active_flag] * len(actual_cashflow)
+        actual_cashflow['Created_By'] = [created_by] * len(actual_cashflow)
+        actual_cashflow['Created_Date'] = [created_date] * len(actual_cashflow)
+        actual_cashflow['Modified_By'] = [modified_by] * len(actual_cashflow)
+        actual_cashflow['Modified_Date'] = [modified_date] * len(actual_cashflow)
+        
+        liab_init_reco['Liability_Init_Rec_ID'] = [str(uuid.uuid4()) for _ in range(len(liab_init_reco))]
+        liab_init_reco['Run_ID'] = [run_id] * len(liab_init_reco)
+        liab_init_reco['Active_Flag'] = [active_flag] * len(liab_init_reco)
+        liab_init_reco['Created_By'] = [created_by] * len(liab_init_reco)
+        liab_init_reco['Created_Date'] = [created_date] * len(liab_init_reco)
+        liab_init_reco['Modified_By'] = [modified_by] * len(liab_init_reco)
+        liab_init_reco['Modified_Date'] = [modified_date] * len(liab_init_reco)
+        liab_init_reco.drop(['PV_DirExpen'],axis=1,inplace=True)
+        
+        rec_bel['Rec_BEL_ID'] = [str(uuid.uuid4()) for _ in range(len(rec_bel))]
+        rec_bel['Run_ID'] = [run_id] * len(rec_bel)
+        rec_bel['Active_Flag'] = [active_flag] * len(rec_bel)
+        rec_bel['Created_By'] = [created_by] * len(rec_bel)
+        rec_bel['Created_Date'] = [created_date] * len(rec_bel)
+        rec_bel['Modified_By'] = [modified_by] * len(rec_bel)
+        rec_bel['Modified_Date'] = [modified_date] * len(rec_bel)
+        
+        rec_ra['Rec_RA_ID'] = [str(uuid.uuid4()) for _ in range(len(rec_ra))]
+        rec_ra['Run_ID'] = [run_id] * len(rec_ra)
+        rec_ra['Active_Flag'] = [active_flag] * len(rec_ra)
+        rec_ra['Created_By'] = [created_by] * len(rec_ra)
+        rec_ra['Created_Date'] = [created_date] * len(rec_ra)
+        rec_ra['Modified_By'] = [modified_by] * len(rec_ra)
+        rec_ra['Modified_Date'] = [modified_date] * len(rec_ra)
+        
+        rec_csm['Rec_CSM_ID'] = [str(uuid.uuid4()) for _ in range(len(rec_csm))]
+        rec_csm['Run_ID'] = [run_id] * len(rec_csm)
+        rec_csm['Active_Flag'] = [active_flag] * len(rec_csm)
+        rec_csm['Created_By'] = [created_by] * len(rec_csm)
+        rec_csm['Created_Date'] = [created_date] * len(rec_csm)
+        
+        rec_totcontliab_up['Rec_TotContLiab_ID'] = [str(uuid.uuid4()) for _ in range(len(rec_totcontliab_up))]
+        rec_totcontliab_up['Run_ID'] = [run_id] * len(rec_totcontliab_up)
+        rec_totcontliab_up['Active_Flag'] = [active_flag] * len(rec_totcontliab_up)
+        rec_totcontliab_up['Created_By'] = [created_by] * len(rec_totcontliab_up)
+        rec_totcontliab_up['Created_Date'] = [created_date] * len(rec_totcontliab_up)
+        rec_totcontliab_up['Modified_By'] = [modified_by] * len(rec_totcontliab_up)
+        rec_totcontliab_up['Modified_Date'] = [modified_date] * len(rec_totcontliab_up)
+        
+        rec_acqexpmor_up['Rec_AcqExpMor_ID'] = [str(uuid.uuid4()) for _ in range(len(rec_acqexpmor_up))]
+        rec_acqexpmor_up['Run_ID'] = [run_id] * len(rec_acqexpmor_up)
+        rec_acqexpmor_up['Active_Flag'] = [active_flag] * len(rec_acqexpmor_up)
+        rec_acqexpmor_up['Created_By'] = [created_by] * len(rec_acqexpmor_up)
+        rec_acqexpmor_up['Created_Date'] = [created_date] * len(rec_acqexpmor_up)
+        rec_acqexpmor_up['Modified_By'] = [modified_by] * len(rec_acqexpmor_up)
+        rec_acqexpmor_up['Modified_Date'] = [modified_date] * len(rec_acqexpmor_up)
+        
+        stat_profloss_up['Stat_Profloss_ID'] = [str(uuid.uuid4()) for _ in range(len(stat_profloss_up))]
+        stat_profloss_up['Run_ID'] = [run_id] * len(stat_profloss_up)
+        stat_profloss_up['Active_Flag'] = [active_flag] * len(stat_profloss_up)
+        stat_profloss_up['Created_By'] = [created_by] * len(stat_profloss_up)
+        stat_profloss_up['Created_Date'] = [created_date] * len(stat_profloss_up)
+        stat_profloss_up['Modified_By'] = [modified_by] * len(stat_profloss_up)
+        stat_profloss_up['Modified_Date'] = [modified_date] * len(stat_profloss_up)
+        
+        
+        IFRS4_Coverage_Units_Rec = ifrs4_data['Coverage Units Reconciliation']
+        IFRS4_Actual_Cashflow = ifrs4_data['Actual Cashflows']
+        IFRS4_Liability_Init_Rec = ifrs4_data['Liability on Initial Recognition']
+        IFRS4_Rec_BEL = ifrs4_data['Reconciliation of Best Estimate Liabilities']
+        IFRS4_Rec_AcqExpMor = ifrs4_data['Reconciliation of Acquisition Expense Amortization']
+        IFRS4_Stat_Profloss = ifrs4_data['Statement of Profit or Loss']
+        
+        IFRS4_Coverage_Units_Rec['Coverage_Units_Rec_ID'] = [str(uuid.uuid4()) for _ in range(len(IFRS4_Coverage_Units_Rec))]
+        IFRS4_Coverage_Units_Rec['Run_ID'] = [run_id] * len(IFRS4_Coverage_Units_Rec)
+        IFRS4_Coverage_Units_Rec['Active_Flag'] = [active_flag] * len(IFRS4_Coverage_Units_Rec)
+        IFRS4_Coverage_Units_Rec['Created_By'] = [created_by] * len(IFRS4_Coverage_Units_Rec)
+        IFRS4_Coverage_Units_Rec['Created_Date'] = [created_date] * len(IFRS4_Coverage_Units_Rec)
+        IFRS4_Coverage_Units_Rec['Modified_By'] = [modified_by] * len(IFRS4_Coverage_Units_Rec)
+        IFRS4_Coverage_Units_Rec['Modified_Date'] = [modified_date] * len(IFRS4_Coverage_Units_Rec)
+        
+        IFRS4_Actual_Cashflow['Actual_Cashflow_ID'] = [str(uuid.uuid4()) for _ in range(len(IFRS4_Actual_Cashflow))]
+        IFRS4_Actual_Cashflow['Run_ID'] = [run_id] * len(IFRS4_Actual_Cashflow)
+        IFRS4_Actual_Cashflow['Active_Flag'] = [active_flag] * len(IFRS4_Actual_Cashflow)
+        IFRS4_Actual_Cashflow['Created_By'] = [created_by] * len(IFRS4_Actual_Cashflow)
+        IFRS4_Actual_Cashflow['Created_Date'] = [created_date] * len(IFRS4_Actual_Cashflow)
+        IFRS4_Actual_Cashflow['Modified_By'] = [modified_by] * len(IFRS4_Actual_Cashflow)
+        IFRS4_Actual_Cashflow['Modified_Date'] = [modified_date] * len(IFRS4_Actual_Cashflow)
+        
+        IFRS4_Liability_Init_Rec['Liability_Init_Rec_ID'] = [str(uuid.uuid4()) for _ in range(len(IFRS4_Liability_Init_Rec))]
+        IFRS4_Liability_Init_Rec['Run_ID'] = [run_id] * len(IFRS4_Liability_Init_Rec)
+        IFRS4_Liability_Init_Rec['Active_Flag'] = [active_flag] * len(IFRS4_Liability_Init_Rec)
+        IFRS4_Liability_Init_Rec['Created_By'] = [created_by] * len(IFRS4_Liability_Init_Rec)
+        IFRS4_Liability_Init_Rec['Created_Date'] = [created_date] * len(IFRS4_Liability_Init_Rec)
+        IFRS4_Liability_Init_Rec['Modified_By'] = [modified_by] * len(IFRS4_Liability_Init_Rec)
+        IFRS4_Liability_Init_Rec['Modified_Date'] = [modified_date] * len(IFRS4_Liability_Init_Rec)
+        IFRS4_Liability_Init_Rec.drop(['PV_DirExpen'],axis=1,inplace=True)
+        
+        IFRS4_Rec_BEL['Rec_BEL_ID'] = [str(uuid.uuid4()) for _ in range(len(IFRS4_Rec_BEL))]
+        IFRS4_Rec_BEL['Run_ID'] = [run_id] * len(IFRS4_Rec_BEL)
+        IFRS4_Rec_BEL['Active_Flag'] = [active_flag] * len(IFRS4_Rec_BEL)
+        IFRS4_Rec_BEL['Created_By'] = [created_by] * len(IFRS4_Rec_BEL)
+        IFRS4_Rec_BEL['Created_Date'] = [created_date] * len(IFRS4_Rec_BEL)
+        IFRS4_Rec_BEL['Modified_By'] = [modified_by] * len(IFRS4_Rec_BEL)
+        IFRS4_Rec_BEL['Modified_Date'] = [modified_date] * len(IFRS4_Rec_BEL)
+        
+        IFRS4_Rec_AcqExpMor['Rec_AcqExpMor_ID'] = [str(uuid.uuid4()) for _ in range(len(IFRS4_Rec_AcqExpMor))]
+        IFRS4_Rec_AcqExpMor['Run_ID'] = [run_id] * len(IFRS4_Rec_AcqExpMor)
+        IFRS4_Rec_AcqExpMor['Active_Flag'] = [active_flag] * len(IFRS4_Rec_AcqExpMor)
+        IFRS4_Rec_AcqExpMor['Created_By'] = [created_by] * len(IFRS4_Rec_AcqExpMor)
+        IFRS4_Rec_AcqExpMor['Created_Date'] = [created_date] * len(IFRS4_Rec_AcqExpMor)
+        IFRS4_Rec_AcqExpMor['Modified_By'] = [modified_by] * len(IFRS4_Rec_AcqExpMor)
+        IFRS4_Rec_AcqExpMor['Modified_Date'] = [modified_date] * len(IFRS4_Rec_AcqExpMor)
+        
+        IFRS4_Stat_Profloss['Stat_Profloss_ID'] = [str(uuid.uuid4()) for _ in range(len(IFRS4_Stat_Profloss))]
+        IFRS4_Stat_Profloss['Run_ID'] = [run_id] * len(IFRS4_Stat_Profloss)
+        IFRS4_Stat_Profloss['Active_Flag'] = [active_flag] * len(IFRS4_Stat_Profloss)
+        IFRS4_Stat_Profloss['Created_By'] = [created_by] * len(IFRS4_Stat_Profloss)
+        IFRS4_Stat_Profloss['Created_Date'] = [created_date] * len(IFRS4_Stat_Profloss)
+        IFRS4_Stat_Profloss['Modified_By'] = [modified_by] * len(IFRS4_Stat_Profloss)
+        IFRS4_Stat_Profloss['Modified_Date'] = [modified_date] * len(IFRS4_Stat_Profloss)
+        IFRS4_Stat_Profloss=IFRS4_Stat_Profloss.rename(columns={'Invest_inc':'Invest_Inc'})
+        IFRS4_Stat_Profloss=IFRS4_Stat_Profloss.rename(columns={'Chnge_Insu_Liab':'Change_Ins_Liab'})
+        
+        with engine.begin() as conn:
+            run.to_sql('Run',schema='Calculation',con=conn,if_exists='append',index=False)
+            coverage_units_rec.to_sql('Coverage_Units_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            actual_cashflow.to_sql('Actual_Cashflow',schema='Calculation',con=conn,if_exists='append',index=False)
+            liab_init_reco.to_sql('Liability_Init_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            rec_bel.to_sql('Rec_BEL',schema='Calculation',con=conn,if_exists='append',index=False)
+            rec_ra.to_sql('Rec_RA',schema='Calculation',con=conn,if_exists='append',index=False)
+            rec_csm.to_sql('Rec_CSM',schema='Calculation',con=conn,if_exists='append',index=False)
+            rec_totcontliab_up.to_sql('Rec_TotContLiab',schema='Calculation',con=conn,if_exists='append',index=False)
+            rec_acqexpmor_up.to_sql('Rec_AcqExpMor',schema='Calculation',con=conn,if_exists='append',index=False)
+            stat_profloss_up.to_sql('Stat_Profloss',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Coverage_Units_Rec.to_sql('IFRS4_Coverage_Units_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Actual_Cashflow.to_sql('IFRS4_Actual_Cashflow',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Liability_Init_Rec.to_sql('IFRS4_Liability_Init_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Rec_BEL.to_sql('IFRS4_Rec_BEL',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Rec_AcqExpMor.to_sql('IFRS4_Rec_AcqExpMor',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Stat_Profloss.to_sql('IFRS4_Stat_Profloss',schema='Calculation',con=conn,if_exists='append',index=False)
+        
+        return JSONResponse(content={"data":comp,"run_id":run_id}, status_code=200)
+        
     except Exception as e:
-        db.rollback()
         print(traceback.format_exc())
-        return {"message": "Error in inserting records", "error": str(e)}
+        return {"error": str(e)}
+
+
+@router.post('/_insert_new_run')
+async def upload_csv(
+    file: UploadFile = File(...),
+    run_name: str = Form(...), 
+    db: Session = Depends(get_db)
+):
+    try:
+        temp_dir = tempfile.gettempdir()
+        temp_file_path = os.path.join(temp_dir, file.filename)
+
+        with open(temp_file_path, "wb") as f:
+            f.write(await file.read())
+
+        df = pd.read_csv(temp_file_path)
+        run , run_input,coverage_uni_recon, actual_cashflow, Liab_init_reco, Rec_BEL_updated, Rec_RA_updated, Rec_CSM_updated, Rec_TotContLiab_up, Rec_AcqExpMor_up, Stat_Profloss_up = calculate(df,run_name)
+        data = IFRS4_calculate(df)
+        
+        run_input = run_input.rename(columns={
+                                            'sum_assured':'Sum_Assured',
+                                            'prem_rate_per1000':'Prem_Rate_Per1000',
+                                            'policy_fees':'Policy_Fees',
+                                            'acq_indirect_expense':'Acq_Indirect_Expense',
+                                            'acq_direct_expenses':'Acq_Direct_Expenses',
+                                            'main_direct_expenses':'Main_Direct_Expenses',
+                                            'main_indirect_expenses':'Main_Indirect_Expenses',
+                                            'discount_rate':'Discount_Rate',
+                                            'asset_ret_rate':'Asset_Ret_Rate',
+                                            'risk_adjst_rate':'Risk_Adjst_Rate',
+                                            'mortality':'Mortality',
+                                            'lapse':'Lapse',
+                                            'policy_yearly_comm':'Policy_Yrly_Com',
+                                            'policy_Init_comm':'Policy_Init_Com',
+                                            'Total_years':'Total_Years',
+                                            'CSM_ret_Rate':'CSM_Ret_Rate',
+                                            })
+        
+        IFRS4_Coverage_Units_Rec = data['Coverage Units Reconciliation']
+        IFRS4_Coverage_Units_Rec['Coverage_Units_Rec_ID'] = coverage_uni_recon['Coverage_Units_Rec_ID']
+        IFRS4_Coverage_Units_Rec['Run_ID'] = run['Run_ID']
+        IFRS4_Coverage_Units_Rec['Created_By'] = run['Created_By']
+        IFRS4_Coverage_Units_Rec['Created_Date'] = run['Created_Date']
+        IFRS4_Coverage_Units_Rec['Modified_By'] = run['Modified_By']
+        IFRS4_Coverage_Units_Rec['Modified_Date'] = run['Modified_Date']
+        
+        IFRS4_Liability_Init_Rec=data['Liability on Initial Recognition']
+        IFRS4_Liability_Init_Rec['Liability_Init_Rec_ID'] = Liab_init_reco['Liability_Init_Rec_ID']
+        IFRS4_Liability_Init_Rec['Run_ID'] = run['Run_ID']
+        IFRS4_Liability_Init_Rec['Created_By'] = run['Created_By']
+        IFRS4_Liability_Init_Rec['Created_Date'] = run['Created_Date']
+        IFRS4_Liability_Init_Rec['Modified_By'] = run['Modified_By']
+        IFRS4_Liability_Init_Rec['Modified_Date'] = run['Modified_Date']
+        IFRS4_Liability_Init_Rec.drop(['PV_DirExpen'],axis=1,inplace=True)
+        
+        IFRS4_Rec_BEL=data['Reconciliation of Best Estimate Liabilities']
+        IFRS4_Rec_BEL['Rec_BEL_ID'] = Rec_BEL_updated['Rec_BEL_ID']
+        IFRS4_Rec_BEL['Run_ID'] = run['Run_ID']
+        IFRS4_Rec_BEL['Created_By'] = run['Created_By']
+        IFRS4_Rec_BEL['Created_Date'] = run['Created_Date']
+        IFRS4_Rec_BEL['Modified_By'] = run['Modified_By']
+        IFRS4_Rec_BEL['Modified_Date'] = run['Modified_Date']
+        
+        IFRS4_Rec_AcqExpMor = data['Reconciliation of Acquisition Expense Amortization']
+        IFRS4_Rec_AcqExpMor['Rec_AcqExpMor_ID'] = Rec_AcqExpMor_up['Rec_AcqExpMor_ID']
+        IFRS4_Rec_AcqExpMor['Run_ID'] = run['Run_ID']
+        IFRS4_Rec_AcqExpMor['Created_By'] = run['Created_By']
+        IFRS4_Rec_AcqExpMor['Created_Date'] = run['Created_Date']
+        IFRS4_Rec_AcqExpMor['Modified_By'] = run['Modified_By']
+        IFRS4_Rec_AcqExpMor['Modified_Date'] = run['Modified_Date']
+        
+        IFRS4_Actual_Cashflow = data['Actual Cashflows']
+        IFRS4_Actual_Cashflow['Actual_Cashflow_ID'] = actual_cashflow['Actual_Cashflow_ID']
+        IFRS4_Actual_Cashflow['Run_ID'] = run['Run_ID']
+        IFRS4_Actual_Cashflow['Created_By'] = run['Created_By']
+        IFRS4_Actual_Cashflow['Created_Date'] = run['Created_Date']
+        IFRS4_Actual_Cashflow['Modified_By'] = run['Modified_By']
+        IFRS4_Actual_Cashflow['Modified_Date'] = run['Modified_Date']
+        
+        IFRS4_Stat_Profloss = data['Statement of Profit or Loss']
+        IFRS4_Stat_Profloss['Stat_Profloss_ID'] = Stat_Profloss_up['Stat_Profloss_ID']
+        IFRS4_Stat_Profloss['Run_ID'] = run['Run_ID']
+        IFRS4_Stat_Profloss['Created_By'] = run['Created_By']
+        IFRS4_Stat_Profloss['Created_Date'] = run['Created_Date']
+        IFRS4_Stat_Profloss['Modified_By'] = run['Modified_By']
+        IFRS4_Stat_Profloss['Modified_Date'] = run['Modified_Date']
+        IFRS4_Stat_Profloss=IFRS4_Stat_Profloss.rename(columns={'Invest_inc':'Invest_Inc'})
+        IFRS4_Stat_Profloss=IFRS4_Stat_Profloss.rename(columns={'Chnge_Insu_Liab':'Change_Ins_Liab'})
+        
+        run_input.drop(['Unnamed: 0'],axis=1,inplace=True)
+        
+        
+        with engine.begin() as conn:
+            run.to_sql('Run',schema='Calculation',con=conn,if_exists='append',index=False)
+            run_input.to_sql('Run_Input',schema='Calculation',con=conn,if_exists='append',index=False)
+            coverage_uni_recon.to_sql('Coverage_Units_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            actual_cashflow.to_sql('Actual_Cashflow',schema='Calculation',con=conn,if_exists='append',index=False)
+            Liab_init_reco.to_sql('Liability_Init_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            Rec_BEL_updated.to_sql('Rec_BEL',schema='Calculation',con=conn,if_exists='append',index=False)
+            Rec_RA_updated.to_sql('Rec_RA',schema='Calculation',con=conn,if_exists='append',index=False)
+            Rec_CSM_updated.to_sql('Rec_CSM',schema='Calculation',con=conn,if_exists='append',index=False)
+            Rec_TotContLiab_up.to_sql('Rec_TotContLiab',schema='Calculation',con=conn,if_exists='append',index=False)
+            Rec_AcqExpMor_up.to_sql('Rec_AcqExpMor',schema='Calculation',con=conn,if_exists='append',index=False)
+            Stat_Profloss_up.to_sql('Stat_Profloss',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Coverage_Units_Rec.to_sql('IFRS4_Coverage_Units_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Liability_Init_Rec.to_sql('IFRS4_Liability_Init_Rec',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Rec_BEL.to_sql('IFRS4_Rec_BEL',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Rec_AcqExpMor.to_sql('IFRS4_Rec_AcqExpMor',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Actual_Cashflow.to_sql('IFRS4_Actual_Cashflow',schema='Calculation',con=conn,if_exists='append',index=False)
+            IFRS4_Stat_Profloss.to_sql('IFRS4_Stat_Profloss',schema='Calculation',con=conn,if_exists='append',index=False)
+            
+            
+        os.remove(temp_file_path)
+
+        return {"message": "CSV file processed successfully.", "run_name": run_name, "rows": len(df)}
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"error": str(e)}
+    
+@router.post("/get_gmm_vs_paa_diff", status_code=200)
+def get_gmm_vs_paa_diff(
+    run_id: str,
+    table_name: str,
+    db: Session = Depends(get_db)
+):
+    try:
+        gmm_query = text(f'SELECT * FROM "Calculation"."{table_name}" WHERE "Run_ID" = :run_id')
+        paas_query = text(f'SELECT * FROM "Calculation"."IFRS4_{table_name}" WHERE "Run_ID" = :run_id')
+        
+        gmm_result_set = db.execute(gmm_query, {"run_id": run_id})
+        paas_result_set = db.execute(paas_query, {"run_id": run_id})
+        
+        gmm_column_names = [col[0] for col in gmm_result_set.cursor.description]
+        paas_column_names = [col[0] for col in paas_result_set.cursor.description]
+        
+        gmm_data = gmm_result_set.fetchall()
+        paas_data = paas_result_set.fetchall()
+        
+        gmm_df = pd.DataFrame(gmm_data, columns=gmm_column_names)
+        paas_df = pd.DataFrame(paas_data, columns=paas_column_names)
+        
+        gmm_df = gmm_df.drop(['Run_ID', 'Active_Flag', 'Created_By', 'Created_Date', 'Modified_By', 'Modified_Date'], axis=1)
+        paas_df = paas_df.drop(['Run_ID', 'Active_Flag', 'Created_By', 'Created_Date', 'Modified_By', 'Modified_Date'], axis=1)
+        
+        diff = GMMvsIFRS4(gmm_df, paas_df)
+        
+        return {"diff": diff.to_dict(orient='records')}
+        
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"message": "Error in fetching data", "error": str(e)}
+
     
 @router.get("/get_session_history", status_code=200)
 def get_session_history(db: Session = Depends(get_db)):
@@ -354,6 +415,12 @@ def get_all_sessions(db: Session = Depends(get_db)):
             "Rec_TotContLiab",
             "Rec_AcqExpMor",
             "Stat_Profloss",
+            'IFRS4_Coverage_Units_Rec',
+            'IFRS4_Actual_Cashflow',
+            'IFRS4_Liability_Init_Rec',
+            'IFRS4_Stat_Profloss',
+            'IFRS4_Rec_BEL',
+            'IFRS4_Rec_AcqExpMor',
         ]
 
         # Dictionary to hold the results

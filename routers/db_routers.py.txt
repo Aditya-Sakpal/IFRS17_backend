@@ -1,0 +1,391 @@
+from datetime import datetime
+from typing import List, Dict, Any
+import pytz
+import traceback
+import uuid
+
+
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+import pandas as pd
+from sqlalchemy import text
+
+from db_related.connect import get_db, engine
+from models.user_management import User, UserGroup
+from models.calculation import Run , RunInput , CoverageUnitsRec , CashFlow , Liability_Init_Rec , Rec_Bel_Updated 
+from constants.misc import TABLE_MODEL_MAPPING
+from schemas.db_schemas import CreateUserRequest, CreateUserGroupRequest 
+
+router = APIRouter()
+
+@router.post("/user", status_code=201)
+def create_users(users: List[CreateUserRequest], db: Session = Depends(get_db)):
+    """
+    This function is used to create multiple new users.
+    
+    Args:
+        users: List of CreateUserRequest objects
+        db: database connection object
+    
+    Returns:
+        dict: message and a list of created User_IDs
+    """
+    created_users = []
+
+    for user in users:
+        user_group = db.query(UserGroup).filter(UserGroup.User_Group_Name == user.User_Group).first()
+
+        if not user_group:
+            raise HTTPException(status_code=400, detail=f"UserGroup '{user.User_Group}' does not exist")
+
+        new_user = User(
+            User_Name=user.User_Name,
+            User_Group=user.User_Group,
+            Email_ID=user.Email_ID,
+            User_Desc=user.User_Desc,
+            Active_Flag=user.Active_Flag,
+            Created_By=user.Created_By,
+            Created_Date=datetime.utcnow(),
+        )
+        
+        db.add(new_user)
+        db.flush()  # Generate User_ID before committing
+        created_users.append({"User_Name": new_user.User_Name, "User_ID": new_user.User_ID})
+    
+    db.commit()
+
+    return {"message": "Users created successfully", "created_users": created_users}
+
+@router.post("/usergroup", status_code=201)
+def create_user_groups(user_groups: List[CreateUserGroupRequest], db: Session = Depends(get_db)):
+    """
+    This function is used to create multiple new UserGroups.
+
+    Args:
+        user_groups: List of CreateUserGroupRequest objects
+        db: database connection object
+
+    Returns:
+        dict: message and a list of created User_Group_IDs
+    """
+    created_user_groups = []
+
+    for user_group in user_groups:
+        existing_user_group = db.query(UserGroup).filter(UserGroup.User_Group_Name == user_group.User_Group_Name).first()
+        
+        if existing_user_group:
+            raise HTTPException(status_code=400, detail=f"UserGroup '{user_group.User_Group_Name}' already exists")
+
+        new_user_group = UserGroup(
+            User_Group_Name=user_group.User_Group_Name,
+            User_Group_Desc=user_group.User_Group_Desc,
+            Active_Flag=user_group.Active_Flag,
+            Created_By=user_group.Created_By,
+            Created_Date=datetime.utcnow(),
+        )
+
+        db.add(new_user_group)
+        db.flush()  # Generate User_Group_ID before committing
+        created_user_groups.append({"User_Group_Name": new_user_group.User_Group_Name, "User_Group_ID": new_user_group.User_Group_ID})
+    
+    db.commit()
+
+    return {"message": "UserGroups created successfully", "created_user_groups": created_user_groups}
+
+@router.post("/insert/{table_name}", status_code=201)
+def insert_records(
+    table_name: str,
+    records: List[Dict[str, Any]],
+    db: Session = Depends(get_db)
+):
+    """
+    Generic route to insert records into any table.
+
+    Args:
+        table_name: Name of the table to insert records into.
+        records: List of dictionaries representing records to insert.
+        db: Database session.
+
+    Returns:
+        dict: Message and a list of created record IDs.
+    """
+    if table_name not in TABLE_MODEL_MAPPING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Table '{table_name}' is not recognized."
+        )
+
+    model = TABLE_MODEL_MAPPING[table_name]
+
+    created_records = []
+
+    for record_data in records:
+        if "Created_By" in record_data:
+            created_by_user = db.query(User).filter(User.User_Name == record_data["Created_By"]).first()
+            if not created_by_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"User '{record_data['Created_By']}' does not exist."
+                )
+
+        if "Modified_By" in record_data and record_data["Modified_By"]:
+            modified_by_user = db.query(User).filter(User.User_Name == record_data["Modified_By"]).first()
+            if not modified_by_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"User '{record_data['Modified_By']}' does not exist."
+                )
+                
+        if table_name != "Run":
+            if "Run_ID" in record_data:
+                run = db.query(Run).filter(Run.Run_ID == record_data["Run_ID"]).first()
+                if not run:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Run with ID '{record_data['Run_ID']}' does not exist."
+                    )
+        else :
+            run = db.query(Run).filter(Run.Run_ID == record_data["Run_ID"]).first()
+            if run:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Run with ID '{record_data['Run_ID']}' already exists."
+                )
+
+        try:
+            new_record = model(**record_data)
+        except TypeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid fields in record data: {str(e)}"
+            )
+
+        db.add(new_record)
+        db.flush()  
+
+        created_records.append({
+            "table_name": table_name,
+            "record_id": getattr(new_record, f"{model.__tablename__}_ID", None)
+        })
+
+    db.commit()
+
+    return {"message": "Records inserted successfully", "created_records": created_records}
+
+
+run_input_df = pd.read_csv('New_Data_Random_inputs.csv')
+
+actual_cashflow_df = pd.read_csv('actual_cashflow.csv')
+actual_cashflow_df = actual_cashflow_df.drop(columns=['Unnamed: 0'])
+actual_cashflow_df['Active_Flag'] = [True]*len(actual_cashflow_df)
+# actual_cashflow_df[]
+
+coverage_uni_recon_df = pd.read_csv('coverage_uni_recon.csv')
+coverage_uni_recon_df = coverage_uni_recon_df.drop(columns=['Unnamed: 0'])
+coverage_uni_recon_df['Active_Flag'] = [True]*len(coverage_uni_recon_df)
+
+liab_init_reco_df = pd.read_csv('Liab_init_reco.csv')
+liab_init_reco_df = liab_init_reco_df.drop(columns=['Unnamed: 0'])
+liab_init_reco_df['Active_Flag'] = [True]*len(liab_init_reco_df)
+
+rec_acpexpmor_up_df = pd.read_csv('Rec_AcqExpMor_up.csv')
+rec_acpexpmor_up_df = rec_acpexpmor_up_df.drop(columns=['Unnamed: 0'])
+rec_acpexpmor_up_df['Active_Flag'] = [True]*len(rec_acpexpmor_up_df)
+
+rec_bel_updated_df = pd.read_csv('Rec_BEL_updated.csv')
+rec_bel_updated_df = rec_bel_updated_df.drop(columns=['Unnamed: 0'])
+rec_bel_updated_df['Active_Flag'] = [True]*len(rec_bel_updated_df)
+
+rec_csm_updated_df = pd.read_csv('Rec_CSM_updated.csv')
+rec_csm_updated_df = rec_csm_updated_df.drop(columns=['Unnamed: 0'])
+rec_csm_updated_df['Active_Flag'] = [True]*len(rec_csm_updated_df)
+
+rec_ra_updated_df = pd.read_csv('Rec_RA_updated.csv')
+rec_ra_updated_df = rec_ra_updated_df.drop(columns=['Unnamed: 0'])
+rec_ra_updated_df['Active_Flag'] = [True]*len(rec_ra_updated_df)
+
+rec_totcontliab_up_df = pd.read_csv('Rec_TotContLiab_up.csv')
+rec_totcontliab_up_df = rec_totcontliab_up_df.drop(columns=['Unnamed: 0'])
+rec_totcontliab_up_df['Active_Flag'] = [True]*len(rec_totcontliab_up_df)
+
+stat_profloss_up_df = pd.read_csv('Stat_Profloss_up.csv')
+stat_profloss_up_df = stat_profloss_up_df.drop(columns=['Unnamed: 0'])
+stat_profloss_up_df['Active_Flag'] = [True]*len(stat_profloss_up_df)
+
+
+@router.post("/_insert_new_run", status_code=201)
+def after_run(
+    records: List[Dict], 
+    db: Session = Depends(get_db)
+):
+    try:
+        # Check for existing Run
+        run = db.query(Run).filter(Run.Run_ID == records[0]['Run_ID']).first()
+        
+        if run:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Run with ID '{records[0]['Run_ID']}' already exists."
+            )
+        
+        # Insert into Run table
+        new_run = Run(
+            Run_ID=records[0]['Run_ID'],
+            Run_Name=records[0]['Run_Name'],
+            Conf_ID=records[0]['Conf_ID'],
+            Reporting_Date=records[0]['Reporting_Date'],
+            Active_Flag=True,
+            Created_By=records[0]['Created_By'],
+            Created_Date=datetime.now(pytz.utc)
+        )
+        db.add(new_run)
+        db.flush()
+        
+        actual_cashflow_df['Actual_Cashflow_ID'] = [uuid.uuid4() for _ in range(len(list(actual_cashflow_df['Actual_Cashflow_ID'])))]
+        actual_cashflow_df['Run_ID'] = [records[0]['Run_ID']]*len(actual_cashflow_df)
+        coverage_uni_recon_df['Coverage_Units_Rec_ID'] = [uuid.uuid4() for _ in range(len(list(coverage_uni_recon_df['Coverage_Units_Rec_ID'])))]
+        coverage_uni_recon_df['Run_ID'] = [records[0]['Run_ID']]*len(coverage_uni_recon_df)
+        liab_init_reco_df['Liability_Init_Rec_ID'] = [uuid.uuid4() for _ in range(len(list(liab_init_reco_df['Liability_Init_Rec_ID'])))]
+        liab_init_reco_df['Run_ID'] = [records[0]['Run_ID']]*len(liab_init_reco_df)
+        rec_acpexpmor_up_df['Rec_AcqExpMor_ID'] = [uuid.uuid4() for _ in range(len(list(rec_acpexpmor_up_df['Rec_AcqExpMor_ID'])))]
+        rec_acpexpmor_up_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_acpexpmor_up_df)
+        rec_bel_updated_df['Rec_BEL_ID'] = [uuid.uuid4() for _ in range(len(list(rec_bel_updated_df['Rec_BEL_ID'])))]
+        rec_bel_updated_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_bel_updated_df)
+        rec_csm_updated_df['Rec_CSM_ID'] = [uuid.uuid4() for _ in range(len(list(rec_csm_updated_df['Rec_CSM_ID'])))]
+        rec_csm_updated_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_csm_updated_df)
+        rec_ra_updated_df['Rec_RA_ID'] = [uuid.uuid4() for _ in range(len(list(rec_ra_updated_df['Rec_RA_ID'])))]
+        rec_ra_updated_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_ra_updated_df)
+        rec_totcontliab_up_df['Rec_TotContLiab_ID'] = [uuid.uuid4() for _ in range(len(list(rec_totcontliab_up_df['Rec_TotContLiab_ID'])))]
+        rec_totcontliab_up_df['Run_ID'] = [records[0]['Run_ID']]*len(rec_totcontliab_up_df)
+        stat_profloss_up_df['Stat_Profloss_ID'] = [uuid.uuid4() for _ in range(len(list(stat_profloss_up_df['Stat_Profloss_ID'])))]
+        stat_profloss_up_df['Run_ID'] = [records[0]['Run_ID']]*len(stat_profloss_up_df)
+        
+        # Insert into RunInput table
+        run_input_sample_record = run_input_df.sample(1)
+        new_run_input = RunInput(
+            Run_ID=records[0]['Run_ID'],
+            Run_Input_ID=records[0]['Run_ID'],
+            Sum_Assured=int(run_input_sample_record['sum_assured'].values[0]),
+            Num_Policies=int(run_input_sample_record['Num_Policies'].values[0]),
+            Policy_Fees=int(run_input_sample_record['policy_fees'].values[0]),
+            Prem_Rate_Per1000=float(run_input_sample_record['prem_rate_per1000'].values[0]),
+            Policy_Init_Com=float(run_input_sample_record['policy_Init_comm'].values[0]),
+            Policy_Yrly_Com=float(run_input_sample_record['policy_yearly_comm'].values[0]),
+            Acq_Direct_Expenses=int(run_input_sample_record['acq_direct_expenses'].values[0]),
+            Acq_Indirect_Expense=int(run_input_sample_record['acq_indirect_expense'].values[0]),
+            Main_Direct_Expenses=int(run_input_sample_record['main_direct_expenses'].values[0]),
+            Main_Indirect_Expenses=int(run_input_sample_record['main_indirect_expenses'].values[0]),
+            Total_Years=int(run_input_sample_record['Total_years'].values[0]),
+            Discount_Rate=float(run_input_sample_record['discount_rate'].values[0]),
+            Asset_Ret_Rate=float(run_input_sample_record['asset_ret_rate'].values[0]),
+            CSM_Ret_Rate=float(run_input_sample_record['CSM_ret_Rate'].values[0]),
+            Risk_Adjst_Rate=float(run_input_sample_record['risk_adjst_rate'].values[0]),
+            Mortality=float(run_input_sample_record['mortality'].values[0]),
+            Lapse=float(run_input_sample_record['lapse'].values[0]),
+            Active_Flag=True,
+            Created_By=records[0]['Created_By'],
+            Created_Date=datetime.now(pytz.utc)
+        )
+        db.add(new_run_input)
+        db.flush()
+        db.commit()
+
+                
+        with engine.begin() as conn: 
+            actual_cashflow_df.to_sql('Actual_Cashflow',schema='Calculation',con=conn, if_exists='append', index=False)
+            coverage_uni_recon_df.to_sql('Coverage_Units_Rec',schema='Calculation',con=conn, if_exists='append', index=False)
+            liab_init_reco_df.to_sql('Liability_Init_Rec',schema='Calculation',con=conn, if_exists='append', index=False)
+            rec_acpexpmor_up_df.to_sql('Rec_AcqExpMor',schema='Calculation',con=conn, if_exists='append', index=False)
+            rec_bel_updated_df.to_sql('Rec_BEL',schema='Calculation',con=conn, if_exists='append', index=False)
+            rec_csm_updated_df.to_sql('Rec_CSM',schema='Calculation',con=conn, if_exists='append', index=False)
+            rec_ra_updated_df.to_sql('Rec_RA',schema='Calculation',con=conn, if_exists='append', index=False)
+            rec_totcontliab_up_df.to_sql('Rec_TotContLiab',schema='Calculation',con=conn, if_exists='append', index=False)
+            stat_profloss_up_df.to_sql('Stat_Profloss',schema='Calculation',con=conn, if_exists='append', index=False)
+            
+        db.commit()
+
+        return {"message": "Records inserted successfully"}
+    
+    except Exception as e:
+        db.rollback()
+        print(traceback.format_exc())
+        return {"message": "Error in inserting records", "error": str(e)}
+    
+@router.post("/insert_new_run", status_code=201)
+def insert_new_run(
+    db: Session = Depends(get_db)
+):
+    try:
+        pass
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"message": "Error in inserting records", "error": str(e)}
+    
+@router.get("/get_session_history", status_code=200)
+def get_session_history(db: Session = Depends(get_db)):
+    try:
+        # Get today's date in UTC
+        today = datetime.now(pytz.utc).date()
+
+        # Query the Run table for records with Reporting_Date matching today's date
+        sessions = db.query(Run).filter(Run.Reporting_Date == today).all()
+        
+        # Convert the result to a simplified dictionary format
+        session_list = [
+            {
+                "Run_ID": session.Run_ID,
+                "Run_Name": session.Run_Name,
+                "Reporting_Date": session.Reporting_Date,
+            }
+            for session in sessions
+        ]
+
+        if not session_list:
+            return {"message": "No sessions found for today's date"}
+
+        return {"sessions": session_list}
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"message": "Error in fetching session history", "error": str(e)}
+    
+@router.get("/get_calculation_history", status_code=200)
+def get_all_sessions(db: Session = Depends(get_db)):
+    try:
+        # Tables to fetch data from
+        tables = [
+            "Run",
+            "Coverage_Units_Rec",
+            "Actual_Cashflow",
+            "Liability_Init_Rec",
+            "Rec_BEL",
+            "Rec_RA",
+            "Rec_CSM",
+            "Rec_TotContLiab",
+            "Rec_AcqExpMor",
+            "Stat_Profloss",
+        ]
+
+        # Dictionary to hold the results
+        results = {}
+
+        # Iterate over tables and fetch all records
+        for table in tables:
+            query = text(f'SELECT * FROM "Calculation"."{table}"')
+            result_set = db.execute(query)
+
+            # Extract column names from the description
+            column_names = [col[0] for col in result_set.cursor.description]
+
+            # Fetch all data and convert to list of dictionaries
+            data = result_set.fetchall()
+            results[table] = [dict(zip(column_names, row)) for row in data]
+
+        if all(len(records) == 0 for records in results.values()):
+            return {"message": "No records found in any table"}
+
+        return {"calculationHistory": results}
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"message": "Error in fetching calculation history", "error": str(e)}
