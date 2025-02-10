@@ -17,10 +17,93 @@ from models.calculation import Run , RunInput , CoverageUnitsRec , CashFlow , Li
 
 router = APIRouter()
 
+required_columns = {
+    'input_id': 'int64',
+    'index': 'int64',
+    'sum_assured': 'int64',
+    'Num_Policies': 'int64',
+    'prem_rate_per1000': 'float64',
+    'policy_fees': 'int64',
+    'policy_Init_comm': 'float64',
+    'policy_yearly_comm': 'float64',
+    'acq_direct_expenses': 'int64',
+    'acq_indirect_expense': 'int64',
+    'main_direct_expenses': 'int64',
+    'main_indirect_expenses': 'int64',
+    'discount_rate': 'float64',
+    'Total_years': 'int64',
+    'asset_ret_rate': 'float64',
+    'CSM_ret_Rate': 'float64',
+    'risk_adjst_rate': 'float64',
+    'mortality': 'float64',
+    'lapse': 'float64'
+}
+
+@router.post("/validate_csv", status_code=200)
+async def validate_csv(file: UploadFile = File(...)):
+    try:
+        # Save uploaded file temporarily
+        temp_dir = tempfile.gettempdir()
+        temp_file_path = os.path.join(temp_dir, file.filename)
+
+        with open(temp_file_path, "wb") as f:
+            f.write(await file.read())
+
+        # Read CSV file
+        df = pd.read_csv(temp_file_path)
+
+        # Check if all required columns are present
+        if not required_columns.keys() <= set(df.columns):
+            missing_columns = required_columns.keys() - set(df.columns)
+            return JSONResponse(
+                content={
+                    "error": "Missing required columns",
+                    "missing_columns": list(missing_columns)
+                },
+                status_code=400 
+            )
+
+        # Check for missing values
+        if df.isnull().values.any():
+            return JSONResponse(
+                content={"error": "Missing values found in the CSV file"},
+                status_code=400
+            )
+
+        # Check data types
+        incorrect_types = {
+            col: df[col].dtype for col, expected_type in required_columns.items()
+            if str(df[col].dtype) != expected_type
+        }
+
+        if incorrect_types:
+           return JSONResponse(
+                content={
+                    "error": "Incorrect data types found in the CSV file",
+                    "incorrect_types": incorrect_types
+                },
+                status_code=400
+            )
+
+        # Cleanup temporary file
+        os.remove(temp_file_path)
+
+        return JSONResponse(
+            content={"message": "CSV file is valid"},
+            status_code=200
+        )
+    except Exception as e:
+        print(traceback.format_exc())
+        return JSONResponse(    
+            content={"error": str(e)},
+            status_code=500
+        )
+
 @router.post('/insert_new_run')
 async def insert_run(
     file: UploadFile = File(...),
     run_name: str = Form(...),
+    reporting_date: str = Form(...),
     db: Session = Depends(get_db)
 ):
     try:
@@ -34,7 +117,6 @@ async def insert_run(
         
         run_id = str(uuid.uuid4())
         conf_id = str(uuid.uuid4())
-        reporting_date = datetime.now(pytz.utc).date()
         active_flag = True
         created_by = "Infogis_User"
         created_date = datetime.now(pytz.utc)
@@ -379,8 +461,13 @@ def get_session_history(db: Session = Depends(get_db)):
         today = datetime.now(pytz.utc).date()
 
         # Query the Run table for records with Reporting_Date matching today's date
-        sessions = db.query(Run).filter(Run.Reporting_Date == today).all()
-        
+        sessions = (
+            db.query(Run)
+            .filter(Run.Reporting_Date == today)
+            .order_by(Run.Modified_Date.desc())  # Sort by Reporting_Date descending
+            .all()
+        )
+
         # Convert the result to a simplified dictionary format
         session_list = [
             {
@@ -423,6 +510,9 @@ def get_all_sessions(db: Session = Depends(get_db)):
             'IFRS4_Rec_AcqExpMor',
         ]
 
+        # Columns to exclude from all tables
+        excluded_columns = { "Active_Flag", "Created_By", "Created_Date", "Modified_By", "Modified_Date"}
+
         # Dictionary to hold the results
         results = {}
 
@@ -431,12 +521,20 @@ def get_all_sessions(db: Session = Depends(get_db)):
             query = text(f'SELECT * FROM "Calculation"."{table}"')
             result_set = db.execute(query)
 
-            # Extract column names from the description
             column_names = [col[0] for col in result_set.cursor.description]
 
-            # Fetch all data and convert to list of dictionaries
             data = result_set.fetchall()
-            results[table] = [dict(zip(column_names, row)) for row in data]
+            
+            if table == 'Run':
+                #Sort records according to the Modified_Date
+                data = sorted(data, key=lambda x: x[column_names.index('Modified_Date')], reverse=True)
+            
+            filtered_data = [
+                {col: value for col, value in zip(column_names, row) if col not in excluded_columns}
+                for row in data
+            ]
+
+            results[table] = filtered_data
 
         if all(len(records) == 0 for records in results.values()):
             return {"message": "No records found in any table"}
