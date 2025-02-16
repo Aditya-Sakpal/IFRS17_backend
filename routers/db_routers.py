@@ -51,7 +51,7 @@ async def validate_csv(file: UploadFile = File(...)):
 
         # Read CSV file
         df = pd.read_csv(temp_file_path)
-
+        
         # Check if all required columns are present
         if not required_columns.keys() <= set(df.columns):
             missing_columns = required_columns.keys() - set(df.columns)
@@ -87,9 +87,15 @@ async def validate_csv(file: UploadFile = File(...)):
 
         # Cleanup temporary file
         os.remove(temp_file_path)
+        
+        no_of_inputs = df['input_id'].nunique()
+
 
         return JSONResponse(
-            content={"message": "CSV file is valid"},
+            content={
+                "message": "CSV file is valid",
+                "no_of_inputs": no_of_inputs
+            },
             status_code=200
         )
     except Exception as e:
@@ -480,8 +486,51 @@ def get_session_history(db: Session = Depends(get_db)):
 
         if not session_list:
             return {"message": "No sessions found for today's date"}
+        
+        #Retrieve all the tables of todays run 
+        tables = [
+            "Coverage_Units_Rec",
+            "Actual_Cashflow",
+            "Liability_Init_Rec",
+            "Rec_BEL",
+            "Rec_RA",
+            "Rec_CSM",
+            "Rec_TotContLiab",
+            "Rec_AcqExpMor",
+            "Stat_Profloss",
+            'IFRS4_Coverage_Units_Rec',
+            'IFRS4_Actual_Cashflow',
+            'IFRS4_Liability_Init_Rec',
+            'IFRS4_Stat_Profloss',
+            'IFRS4_Rec_BEL',
+            'IFRS4_Rec_AcqExpMor',
+        ]
+        
+        # Dictionary to hold the results
+        results = {}
+        
+        for session in session_list:
+            run_id = session["Run_ID"]
+            results[run_id] = {}
+            
+            for table in tables:
+                query = text(f'SELECT * FROM "Calculation"."{table}" WHERE "Run_ID" = :run_id')
+                result_set = db.execute(query, {"run_id": run_id})
 
-        return {"sessions": session_list}
+                column_names = [col[0] for col in result_set.cursor.description]
+
+                data = result_set.fetchall()
+                filtered_data = [
+                    {col: value for col, value in zip(column_names, row)}
+                    for row in data
+                ]
+
+                results[run_id][table] = filtered_data
+            
+            results[run_id]['Run_ID'] = run_id
+            
+                
+        return {"sessions": session_list , "sessionData": results}
 
     except Exception as e:
         print(traceback.format_exc())
